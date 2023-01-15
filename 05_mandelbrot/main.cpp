@@ -1,13 +1,12 @@
 #include <iostream>
 
+#include "colormap.h"
 #include "pfc/bitmap.h"
 #include "pfc/chrono.h"
 #include "pfc/jobs.h"
 
-using real_type = double;
+using real_type = float;
 using dim_t = size_t;
-
-static constexpr int mandelbrot_max_iterations{128};
 
 struct image_dimensions_t {
   dim_t width;
@@ -68,9 +67,7 @@ void run_job(pfc::jobs<real_type>::job_t const& job,
       auto const coord{to_coord({x, y})};
       auto const mandelbrot_value{
           calc_mandelbrot(coord, mandelbrot_max_iterations)};
-      auto const color{static_cast<uint8_t>(mandelbrot_value)};
-      bitmap.at(x, y) = pfc::bmp::pixel_t{
-          .bgr_3{.blue = color, .green = color, .red = color}};
+      bitmap.at(x, y) = colormap[mandelbrot_value];
     }
   }
   bitmap.to_file("test.bmp");
@@ -83,7 +80,8 @@ int main(int argc, char const* argv[]) {
 
   for (auto& job : jobs) {
     auto const elapsed_time{pfc::timed_run([&job]() {
-      run_job(job, {8192, 4608});
+      // run_job(job, {8192, 4608});
+      run_job(job, {1640, 920});
     })};
     auto const millis{
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed_time)};
