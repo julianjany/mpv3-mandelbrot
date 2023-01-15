@@ -1,7 +1,13 @@
+#include <iostream>
+
+#include "pfc/bitmap.h"
+#include "pfc/chrono.h"
 #include "pfc/jobs.h"
 
 using real_type = double;
-using dim_t = int;
+using dim_t = size_t;
+
+static constexpr int mandelbrot_max_iterations{128};
 
 struct image_dimensions_t {
   dim_t width;
@@ -34,17 +40,40 @@ struct coordinate_transformer_t {
   real_type const m_dy;
 };
 
+bool outside_mandelbrot(pfc::complex<real_type> const& coord) {
+  return (coord.real * coord.real + coord.imag * coord.imag) >
+         static_cast<real_type>(4);
+}
+
+int calc_mandelbrot(pfc::complex<real_type> const& initial_coord,
+                    int const max_iterations) {
+  pfc::complex<real_type> current_coord{0, 0};
+  int iteration{0};
+  while (!outside_mandelbrot(current_coord) && iteration < max_iterations) {
+    current_coord.square() += initial_coord;
+    ++iteration;
+  }
+  return iteration;
+}
+
 void run_job(pfc::jobs<real_type>::job_t const& job,
              image_dimensions_t const render_dimensions) {
   auto& [lower_left, upper_right, center, dimensions]{job};
 
   auto const to_coord{
       coordinate_transformer_t{lower_left, upper_right, render_dimensions}};
+  pfc::bitmap bitmap{render_dimensions.width, render_dimensions.height};
   for (dim_t y = 0; y < render_dimensions.height; ++y) {
     for (dim_t x = 0; x < render_dimensions.width; ++x) {
       auto const coord{to_coord({x, y})};
+      auto const mandelbrot_value{
+          calc_mandelbrot(coord, mandelbrot_max_iterations)};
+      auto const color{static_cast<uint8_t>(mandelbrot_value)};
+      bitmap.at(x, y) = pfc::bmp::pixel_t{
+          .bgr_3{.blue = color, .green = color, .red = color}};
     }
   }
+  bitmap.to_file("test.bmp");
 }
 
 int main(int argc, char const* argv[]) {
@@ -53,6 +82,11 @@ int main(int argc, char const* argv[]) {
   auto const jobs{pfc::jobs<real_type>(filepath)};
 
   for (auto& job : jobs) {
-    run_job(job, {800, 600});
+    auto const elapsed_time{pfc::timed_run([&job]() {
+      run_job(job, {8192, 4608});
+    })};
+    auto const millis{
+        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed_time)};
+    std::cout << millis.count() << "ms\n";
   }
 }
