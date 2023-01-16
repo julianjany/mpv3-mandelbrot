@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <execution>
 #include <iostream>
 
 #include "colormap.h"
@@ -6,7 +8,7 @@
 #include "pfc/jobs.h"
 
 using real_type = float;
-using dim_t = size_t;
+using dim_t = int;
 
 struct image_dimensions_t {
   dim_t width;
@@ -61,15 +63,35 @@ void run_job(pfc::jobs<real_type>::job_t const& job,
 
   auto const to_coord{
       coordinate_transformer_t{lower_left, upper_right, render_dimensions}};
-  pfc::bitmap bitmap{render_dimensions.width, render_dimensions.height};
-  for (dim_t y = 0; y < render_dimensions.height; ++y) {
-    for (dim_t x = 0; x < render_dimensions.width; ++x) {
-      auto const coord{to_coord({x, y})};
-      auto const mandelbrot_value{
-          calc_mandelbrot(coord, mandelbrot_max_iterations)};
-      bitmap.at(x, y) = colormap[mandelbrot_value];
-    }
-  }
+  pfc::bitmap bitmap{static_cast<size_t>(render_dimensions.width),
+                     static_cast<size_t>(render_dimensions.height)};
+
+  auto const p_data{bitmap.data()};
+  std::for_each(
+      std::execution::par_unseq, bitmap.span().begin(), bitmap.span().end(),
+      [p_data, render_dimensions, to_coord](pfc::bmp::pixel_t& pixel) {
+        auto const n{static_cast<dim_t>(&pixel - p_data)};
+        dim_t const x{n % render_dimensions.width};
+        dim_t const y{n / render_dimensions.width};
+
+        auto const coord{to_coord({x, y})};
+        auto const mandelbrot_value{
+            calc_mandelbrot(coord, mandelbrot_max_iterations)};
+        pixel = colormap[mandelbrot_value];
+      });
+
+  // #pragma omp parallel for shared(bitmap, colormap, render_dimensions)
+  // schedule(guided, 8) if (true)
+  // for (dim_t n = 0; n < (render_dimensions.width * render_dimensions.height);
+  //      ++n) {
+  //   dim_t const x{n % render_dimensions.width};
+  //   dim_t const y{n / render_dimensions.width};
+  //
+  //   auto const coord{to_coord({x, y})};
+  //   auto const mandelbrot_value{
+  //       calc_mandelbrot(coord, mandelbrot_max_iterations)};
+  //   bitmap.at(x, y) = colormap[mandelbrot_value];
+  // }
   bitmap.to_file("test.bmp");
 }
 
