@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <execution>
 #include <iostream>
+#include <limits>
 
 #include "colormap.h"
 #include "pfc/bitmap.h"
@@ -57,8 +58,10 @@ int calc_mandelbrot(pfc::complex<real_type> const& initial_coord,
   return iteration;
 }
 
-void run_job(pfc::jobs<real_type>::job_t const& job,
-             image_dimensions_t const render_dimensions) {
+template <typename Policy>
+pfc::bitmap run_job(pfc::jobs<real_type>::job_t const& job,
+                    image_dimensions_t const render_dimensions,
+                    Policy&& policy) {
   auto& [lower_left, upper_right, center, dimensions]{job};
 
   auto const to_coord{
@@ -68,7 +71,7 @@ void run_job(pfc::jobs<real_type>::job_t const& job,
 
   auto const p_data{bitmap.data()};
   std::for_each(
-      std::execution::par_unseq, bitmap.span().begin(), bitmap.span().end(),
+      policy, bitmap.span().begin(), bitmap.span().end(),
       [p_data, render_dimensions, to_coord](pfc::bmp::pixel_t& pixel) {
         auto const n{static_cast<dim_t>(&pixel - p_data)};
         dim_t const x{n % render_dimensions.width};
@@ -80,19 +83,20 @@ void run_job(pfc::jobs<real_type>::job_t const& job,
         pixel = colormap[mandelbrot_value];
       });
 
-  // #pragma omp parallel for shared(bitmap, colormap, render_dimensions)
-  // schedule(guided, 8) if (true)
-  // for (dim_t n = 0; n < (render_dimensions.width * render_dimensions.height);
-  //      ++n) {
-  //   dim_t const x{n % render_dimensions.width};
-  //   dim_t const y{n / render_dimensions.width};
+  // #pragma omp parallel for shared(bitmap, colormap, render_dimensions) \
+  //     schedule(static, 32) if (parallel)
+  //   for (dim_t n = 0; n < (render_dimensions.width *
+  //   render_dimensions.height);
+  //        ++n) {
+  //     dim_t const x{n % render_dimensions.width};
+  //     dim_t const y{n / render_dimensions.width};
   //
-  //   auto const coord{to_coord({x, y})};
-  //   auto const mandelbrot_value{
-  //       calc_mandelbrot(coord, mandelbrot_max_iterations)};
-  //   bitmap.at(x, y) = colormap[mandelbrot_value];
-  // }
-  bitmap.to_file("test.bmp");
+  //     auto const coord{to_coord({x, y})};
+  //     auto const mandelbrot_value{
+  //         calc_mandelbrot(coord, mandelbrot_max_iterations)};
+  //     bitmap.at(x, y) = colormap[mandelbrot_value];
+  //   }
+  return bitmap;
 }
 
 int main(int argc, char const* argv[]) {
@@ -101,12 +105,26 @@ int main(int argc, char const* argv[]) {
   auto const jobs{pfc::jobs<real_type>(filepath)};
 
   for (auto& job : jobs) {
-    auto const elapsed_time{pfc::timed_run([&job]() {
-      // run_job(job, {8192, 4608});
-      run_job(job, {1640, 920});
-    })};
-    auto const millis{
-        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed_time)};
-    std::cout << millis.count() << "ms\n";
+    std::chrono::nanoseconds sequential_time{
+        std::numeric_limits<long long>::max()};
+    for (int i{0}; i < 64; ++i) {
+      auto const time{pfc::timed_run([&job]() {
+        run_job(job, {1640, 920}, std::execution::seq);
+      })};
+      sequential_time = std::min(sequential_time, time);
+    }
+    std::chrono::nanoseconds parallel_time{
+        std::numeric_limits<long long>::max()};
+    for (int i{0}; i < 64; ++i) {
+      auto const time{pfc::timed_run([&job]() {
+        run_job(job, {1640, 920}, std::execution::par_unseq);
+      })};
+      parallel_time = std::min(parallel_time, time);
+    }
+    double const speedup{static_cast<double>(sequential_time.count()) /
+                         parallel_time.count()};
+
+    std::cout << "speedup: " << speedup << "\n";
+    exit(0);  // stop after first image
   }
 }
